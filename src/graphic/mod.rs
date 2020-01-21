@@ -1,13 +1,11 @@
+mod color;
+mod palette;
+pub use color::Color;
+
 pub struct Image {
     pub pixels: std::boxed::Box<[Color]>,
     pub width: usize,
     pub height: usize,
-}
-#[derive(Copy, Clone, Debug)]
-pub struct Color {
-    pub r: u8,
-    pub g: u8,
-    pub b: u8,
 }
 impl Image {
     pub fn new() -> Self {
@@ -21,9 +19,19 @@ impl Image {
             height,
         }
     }
-    pub fn draw(&self, cr: &cairo::Context) {
-        println!("Started drawing");
-        cr.scale(self.width as f64, self.height as f64);
+    pub fn draw(&self, cr: &cairo::Context, widget_size: (i32, i32)) {
+        //println!("Started drawing");
+        /* println!("Info: ");
+        println!("Image {}x{}", w, h);
+        println!("Widget {}x{}", widget_width, widget_height);
+        println!("Pixel {}x{}", pixel_width, pixel_height); */
+        let w = self.width as f64;
+        let h = self.height as f64;
+        let widget_width = widget_size.0 as f64;
+        let widget_height = widget_size.1 as f64;
+        let pixel_width = 1. / w;
+        let pixel_height = 1. / h;
+        cr.scale(widget_width, widget_height);
         cr.set_source_rgb(0.0, 0.0, 0.0);
         cr.paint();
         for y in 0..self.height {
@@ -35,41 +43,13 @@ impl Image {
                     .into();
                 cr.set_source_rgb(r, g, b);
                 cr.rectangle(
-                    x as f64 / self.width as f64,
-                    y as f64 / self.height as f64,
-                    1.,
-                    1.,
+                    x as f64 * pixel_width,
+                    y as f64 * pixel_height,
+                    pixel_width,
+                    pixel_height,
                 );
                 cr.fill();
             }
         }
-    }
-}
-impl std::convert::From<(u8, u8, u8)> for Color {
-    fn from(color: (u8, u8, u8)) -> Self {
-        Color {
-            r: color.0,
-            g: color.1,
-            b: color.2,
-        }
-    }
-}
-impl std::convert::From<i32> for Color {
-    fn from(num: i32) -> Self {
-        let num = num & 0x00_FF_FF_FF; // Remove alpha
-        Color {
-            r: (num >> 16) as u8,
-            g: (num >> 8) as u8,
-            b: (num) as u8,
-        }
-    }
-}
-impl std::convert::Into<(f64, f64, f64)> for &Color {
-    fn into(self) -> (f64, f64, f64) {
-        (
-            (self.r as f64) / 255.0,
-            (self.g as f64) / 255.0,
-            (self.b as f64) / 255.0,
-        )
     }
 }
