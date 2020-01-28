@@ -11,14 +11,14 @@ pub enum Flags {
     Carry = 1,
 }
 #[allow(non_snake_case)]
-pub struct Cpu {
+pub struct Registers {
     pub A: u8,
     pub X: u8,
     pub Y: u8,
     pub PC: u16,
     pub flags: u8,
 }
-impl Cpu {
+impl Registers {
     pub fn test(&self, flag: Flags) -> bool {
         (self.flags & flag as u8) != 0
     }
@@ -46,7 +46,7 @@ impl Cpu {
         self.A = value;
     }
 }
-impl std::default::Default for Cpu {
+impl std::default::Default for Registers {
     fn default() -> Self {
         Self {
             A: 0x00,
@@ -57,7 +57,7 @@ impl std::default::Default for Cpu {
         }
     }
 }
-impl std::fmt::Debug for Cpu {
+impl std::fmt::Debug for Registers {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
         write!(
             f,

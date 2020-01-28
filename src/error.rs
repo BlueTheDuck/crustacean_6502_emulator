@@ -21,4 +21,4 @@ macro_rules! prog_err {
     };
 }
 
-prog_err!(glib::BoolError, crate::sixty_five::error::EmulatorError);
+prog_err!(glib::BoolError);

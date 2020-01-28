@@ -1,3 +1,20 @@
+use std::convert::{From, Into};
+
+struct Address(usize);
+impl From<usize> for Address {
+    fn from(v: usize) -> Self {
+        if v > 0xFFFF {
+            panic!("Address is bigger than 0x10000 (Got 0x{:04X})", v);
+        }
+        Self(v)
+    }
+}
+impl From<u16> for Address {
+    fn from(v: u16) -> Self {
+        Self(v as usize)
+    }
+}
+
 pub fn get_size(addr_mode: AddressingMode) -> usize {
     OP_SIZES[addr_mode as usize]
 }

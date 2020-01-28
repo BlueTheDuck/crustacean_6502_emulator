@@ -6,87 +6,81 @@ use gio::prelude::*;
 use gtk::prelude::*;
 use gtk::Builder;
 
-mod sixty_five;
-use sixty_five::Emulator;
+mod emulator;
 mod graphic;
+mod handler;
 use graphic::{Color, Image};
+use handler::{Cmd, ThreadedEmulator};
 
-#[derive(Copy, Clone, Debug, PartialEq)]
-enum Cmd {
-    Step,
-    Run,
-    Stop,
-    Reset,
-}
-impl std::convert::From<&str> for Cmd {
-    fn from(text: &str) -> Self {
-        match text {
-            "Step" => Self::Step,
-            "Run" => Self::Run,
-            "Stop" => Self::Stop,
-            "Reset" => Self::Reset,
-            _ => panic!("???"),
-        }
-    }
+macro_rules! gtk_rs {
+    ($builder:expr=>$name:expr) => {
+        $builder
+            .get_object($name)
+            .unwrap_or_else(|| panic!("Object {} could't be found", $name))
+    };
 }
 
 pub fn init(app: &gtk::Application) -> Result<(), ProgErr> {
-    let img = Image::new();
-    let (img_width, img_height) = (img.width, img.height);
     use std::sync::{Arc, Mutex};
-    let img_m = Arc::from(Mutex::from(img));
-    let palette = Arc::from(Mutex::from([Color::default(); 16]));
+    let img_m = Arc::from(Mutex::from(Image::new()));
+    let palette: Arc<Mutex<_>> = Arc::from(Mutex::from([Color::default(); 16]));
 
-    // Handle emulator CMDs
-    let (tcmd, rcmd) = std::sync::mpsc::channel::<Cmd>();
-    let (tdata, rdata) = glib::MainContext::channel(glib::source::Priority::default());
-    let emulator = Arc::from(Mutex::from(Emulator::new()));
-    {
-        let emulator = emulator.clone();
-        std::thread::spawn(move || loop {
-            if let Ok(cmd) = rcmd.recv() {
-                let mut emulator = match emulator.try_lock() {
-                    Err(_) => continue,
-                    Ok(v) => v,
-                };
-                match cmd {
-                    Cmd::Step => {
-                        if let Err(e) = emulator.step() {
-                            println!("{:#?}", e);
-                        }
-                    }
-                    Cmd::Reset => {
-                        emulator.restart();
-                        emulator.ram = *include_bytes!("color.hex");
-                    }
-                    Cmd::Run => loop {
-                        if let Ok(_) = rcmd.recv_timeout(std::time::Duration::from_millis(1)) {
-                            break;
-                        } else {
-                            if let Err(e) = emulator.step() {
-                                println!("Emulator error: {:?}", e);
-                                break;
-                            }
-                            println!("Tick {}", emulator.cycles);
-                            let page_02 = Vec::from(&emulator.ram[0x200..0x300]);
-                            tdata.send(page_02);
-                        }
-                    },
-                    _ => {}
-                };
-                println!("Tick {}", emulator.cycles);
-                let page_02 = Vec::from(&emulator.ram[0x200..0x300]);
-                tdata.send(page_02);
-            }
-        });
-    }
+    let emulator = ThreadedEmulator::new();
 
+    /*
+       // Handle emulator CMDs
+       let (tcmd, rcmd) = std::sync::mpsc::channel::<Cmd>();
+       let (tdata, rdata) = glib::MainContext::channel(glib::source::Priority::default());
+       let emulator = Arc::from(Mutex::from(System::new()));
+       {
+           let emulator = emulator.clone();
+           std::thread::spawn(move || loop {
+               if let Ok(cmd) = rcmd.recv() {
+                   if let Ok(mut emulator) = emulator.try_lock() {
+                       match cmd {
+                           Cmd::Step => {
+                               if let Err(e) = emulator.step() {
+                                   println!("{:#?}", e);
+                               }
+                           }
+                           Cmd::Reset => {
+                               emulator.restart();
+                               emulator.ram = *include_bytes!("color.hex");
+                           }
+                           Cmd::Run => loop {
+                               if let Ok(_) = rcmd.recv_timeout(std::time::Duration::from_millis(1)) {
+                                   break;
+                               } else {
+                                   if let Err(e) = emulator.step() {
+                                       println!("Emulator error: {:?}", e);
+                                       break;
+                                   }
+                                   println!("Tick {}", emulator.cycles);
+                                   let page_02 = Vec::from(&emulator.ram[0x200..0x300]);
+                                   tdata.send(page_02);
+                               }
+                           },
+                           _ => {}
+                       };
+                       println!("Tick {}", emulator.cycles);
+                       let page_02 = Vec::from(&emulator.ram[0x200..0x300]);
+                       tdata.send(page_02);
+                   } else {
+                       continue;
+                   }
+               }
+           });
+       }
+
+
+
+    */
     let builder: Builder = Builder::new_from_string(include_str!("ui.glade"));
-    let window: gtk::ApplicationWindow = builder.get_object("Window").unwrap();
-    let drawing_area: gtk::DrawingArea = builder.get_object("Display").unwrap();
-    let drawing_area = Arc::from(drawing_area);
+    //let window: Option<gtk::ApplicationWindow> = builder.get_object("Window");
+    let window: gtk::ApplicationWindow = gtk_rs!(builder=>"Window");
+    let drawing_area: gtk::DrawingArea = gtk_rs!(builder=>"Display");
+    //let drawing_area = Arc::from(drawing_area);
     {
-        drawing_area.set_size_request(img_width as i32, img_height as i32);
         let img_m = img_m.clone();
         drawing_area.connect_draw(
             move |drawing_area: &gtk::DrawingArea, ctx: &cairo::Context| {
@@ -102,20 +96,20 @@ pub fn init(app: &gtk::Application) -> Result<(), ProgErr> {
     }
 
     for widget_name in &["Step", "Reset", "Run", "Stop"] {
-        let tcmd_clone = tcmd.clone();
-        let widget: gtk::Button = builder.get_object(widget_name).expect("Not found");
+        let tcmd = emulator.tcmd.clone();
+        let widget: gtk::Button = gtk_rs!(builder=>widget_name); // builder.get_object(widget_name).expect("Not found");
         widget.connect_clicked(move |s: &gtk::Button| {
             let name = s.get_widget_name().unwrap();
             let name = name.as_str();
             println!("Sending from {}", name);
-            tcmd_clone.send(Cmd::from(name)).expect("Couldn't send cmd");
+            tcmd.send(Cmd::from(name)).expect("Couldn't send cmd");
         });
     }
 
     // Ram Display
-    {
-        let ram_display_window: gtk::Window = builder.get_object("RamDisplayWindow").unwrap();
-        let switch: gtk::Switch = builder.get_object("RamDisplay").expect("Not Found");
+    /* {
+        let ram_display_window: gtk::Window = gtk_rs!(builder=>"RamDisplayWindow"); // builder.get_object().unwrap();
+        let switch: gtk::Switch = gtk_rs!(builder=>"RamDisplay"); // builder.get_object().expect("Not Found");
         switch.connect_state_set(move |switch: &gtk::Switch, state: bool| {
             if state {
                 ram_display_window.show_all();
@@ -126,19 +120,17 @@ pub fn init(app: &gtk::Application) -> Result<(), ProgErr> {
 
             Inhibit(false)
         });
-        let ram_list: gtk::Window = builder.get_object("RamList").unwrap();
-    }
+        let ram_list: gtk::Window = gtk_rs!(builder=>"RamList");
+    } */
 
-    let registers: gtk::Label = builder.get_object("Registers").unwrap();
-    let registers = Mutex::from(registers);
+    let registers: gtk::Label = gtk_rs!(builder=>"Registers");
 
     // Receive GPU page
     {
         let drawing_area = drawing_area.clone();
         let palette = palette.clone();
-        let emulator = emulator.clone();
         let img_m = img_m.clone();
-        rdata.attach(None, move |data: Vec<_>| {
+        emulator.rdata.attach(None, move |data: Vec<_>| {
             println!("Received page");
             for line in data.chunks(16) {
                 println!(
@@ -159,10 +151,9 @@ pub fn init(app: &gtk::Application) -> Result<(), ProgErr> {
                     }
                 }
             }
-            if let Ok(registers) = registers.try_lock() {
-                if let Ok(emulator) = emulator.try_lock() {
-                    registers.set_text(&format!("{:#?}", emulator.cpu));
-                }
+
+            if let Ok(system) = emulator.system.try_lock() {
+                registers.set_text(&format!("{:#?}", system.registers));
             }
             drawing_area.queue_draw();
             glib::Continue(true)
@@ -174,8 +165,8 @@ pub fn init(app: &gtk::Application) -> Result<(), ProgErr> {
         for i in 0..16 {
             let drawing_area = drawing_area.clone();
             let palette = palette.clone();
-            let color_button: gtk::ColorButton =
-                builder.get_object(&format!("ColorPalette{}", i)).unwrap();
+            let color_button = &format!("ColorPalette{}", i);
+            let color_button: gtk::ColorButton = gtk_rs!(builder=>color_button);
             color_button.connect_color_set(move |s: &gtk::ColorButton| {
                 let color = s.get_rgba();
                 let color = Color::from((color.red, color.green, color.blue));
@@ -190,13 +181,14 @@ pub fn init(app: &gtk::Application) -> Result<(), ProgErr> {
 
     window.set_application(Some(app));
     window.show_all();
+
     Ok(())
 }
 
 fn main() -> Result<(), ProgErr> {
     let app: gtk::Application =
         gtk::Application::new(Some("com.ducklings_corp.emulator"), Default::default())?;
-    app.connect_activate(move |app| init(app).expect("Init failed"));
+    app.connect_activate(|app| init(app).expect("Init failed"));
     app.run(&std::env::args().collect::<Vec<_>>());
     Ok(())
 }
