@@ -130,6 +130,7 @@ pub fn init(app: &gtk::Application) -> Result<(), ProgErr> {
         let drawing_area = drawing_area.clone();
         let palette = palette.clone();
         let img_m = img_m.clone();
+        let system = emulator.system.clone();
         emulator.rdata.attach(None, move |data: Vec<_>| {
             println!("Received page");
             for line in data.chunks(16) {
@@ -152,7 +153,7 @@ pub fn init(app: &gtk::Application) -> Result<(), ProgErr> {
                 }
             }
 
-            if let Ok(system) = emulator.system.try_lock() {
+            if let Ok(system) = system.try_lock() {
                 registers.set_text(&format!("{:#?}", system.registers));
             }
             drawing_area.queue_draw();

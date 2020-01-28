@@ -69,7 +69,11 @@ impl ThreadedEmulator {
                 });
                 println!("Cmd: {:?}", cmd);
                 match cmd {
-                    Cmd::Step => system.step()?,
+                    Cmd::Step => {
+                        system.step()?;
+                        let page_02 = Vec::from(&system.ram[0x200..0x300]);
+                        tdata.send(page_02);
+                    }
                     Cmd::Reset => {
                         system.restart();
                         system.ram = *TEST_CODE;
@@ -78,6 +82,8 @@ impl ThreadedEmulator {
                         if let Err(e) = rcmd.recv_timeout(std::time::Duration::from_millis(1)) {
                             if e == std::sync::mpsc::RecvTimeoutError::Timeout {
                                 system.step()?;
+                                let page_02 = Vec::from(&system.ram[0x200..0x300]);
+                                tdata.send(page_02);
                             } else {
                                 panic!("Controller mpsc disconnected: {}", e)
                             }
