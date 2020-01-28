@@ -1,24 +1,24 @@
+use super::addressing_modes::{get_size, Address, AddressingMode};
+use super::components::{Flags, Ram, Registers};
 use super::error;
 use super::opcodes;
-use super::registers::{Flags, Registers};
 use super::OpcodeType;
-use super::{addressing_modes::get_size, AddressingMode};
 
 fn invalid_mode<T>(mode_used: AddressingMode) -> T {
     panic!("The addressign mode used ({:?}) is either not valid for this opcode, or expects an argument which was not provided",mode_used)
 }
 
-static RESET_VEC_ADDR: usize = 0xFFFC;
+static RESET_VEC_ADDR: Address = Address(0xFFFC);
 
 macro_rules! fetch {
     ($self:ident PC+$off:expr) => {
-        $self.ram[$self.registers.PC as usize + $off]
+        $self.ram[$self.registers.PC + Address($off)]
     };
     ($self:ident $addr:expr) => {
-        $self.ram[$addr as usize]
+        $self.ram[$addr]
     };
     ($self:ident D $addr:expr) => {
-        ($self.ram[$addr as usize + 1] as u16) << 8 | $self.ram[$addr as usize] as u16
+        ($self.ram[$addr.next()] as u16) << 8 | $self.ram[$addr] as u16
     };
 }
 macro_rules! operation {
@@ -35,22 +35,22 @@ macro_rules! operation {
 
 pub struct System {
     pub cycles: usize,
-    pub ram: [u8; 0x10000],
+    pub ram: Ram,
     pub registers: Registers,
 }
 impl System {
     pub fn new() -> Self {
         Self {
             cycles: 0,
-            ram: [0x00; 0x10000],
+            ram: Ram([0x00; 0x10000]),
             registers: Registers::default(),
         }
     }
     pub fn init(&mut self) -> Result<(), error::CpuError> {
         let lo: u16 = self.ram[RESET_VEC_ADDR] as u16;
-        let hi: u16 = self.ram[RESET_VEC_ADDR + 1] as u16;
+        let hi: u16 = self.ram[RESET_VEC_ADDR.same_page_add(1usize)] as u16;
         let addr = hi << 8 | lo;
-        self.registers.PC = addr;
+        self.registers.PC = addr.into();
         Ok(())
     }
     pub fn step(&mut self) -> Result<(), error::CpuError> {
@@ -61,8 +61,8 @@ impl System {
         /* if self.registers.test(Flags::Break) {
             return Err(error::EmulatorError::Break);
         } */
-        println!("Step on {:04X}", self.registers.PC);
-        let code = self.ram[self.registers.PC as usize];
+        println!("Step on {:04X}", *self.registers.PC);
+        let code = self.ram[self.registers.PC];
         let code = match opcodes::from_code(code) {
             None => return Err(error::CpuError::UnknownOp(code)),
             Some(v) => v,
@@ -78,28 +78,28 @@ impl System {
             }
             AddressingMode::ABS => {
                 // Next 2 bytes are an address from where to fetch the real argument
-                let addr = self.registers.PC as usize + 1;
+                let addr = self.registers.PC.next();
                 Some(fetch!(self D addr) as u16)
             }
             AddressingMode::ZPG => {
                 // Next byte is an address from the range 0x0000-0x00FF
-                let addr = self.registers.PC as usize + 1;
+                let addr = self.registers.PC.same_page_add(1u16);
                 Some(fetch!(self addr) as u16)
             }
             AddressingMode::INDX => {
                 // Take the next byte and add it to X,
                 // then use the result as an address and fetch 2 bytes
                 let arg = fetch!(self PC+1); // Opcode arg
-                let addr: u8 = operation!(self X+arg); // Zero-page addr
-                let addr_lo = self.ram[addr as usize] as usize;
-                let addr_hi = self.ram[addr.wrapping_add(1) as usize] as usize;
+                let addr: Address = operation!(self X+arg).into(); // Zero-page addr
+                let addr_lo = self.ram[addr] as usize;
+                let addr_hi = self.ram[addr.next()] as usize;
                 let res_addr = addr_hi << 8 | addr_lo;
                 Some(res_addr as u16)
             }
             AddressingMode::REL => {
                 // Add PC with the next byte
                 let arg = fetch!(self PC+1) as u8 as i8 as isize;
-                let pc = self.registers.PC as usize as isize;
+                let pc = (*self.registers.PC) as isize;
                 let new_pc = (arg + pc) & 0xFFFF;
                 Some(new_pc as u16)
             }
@@ -120,21 +120,21 @@ impl System {
                 AddressingMode::IMM => self.registers.set_a(operation!(unwrap arg code) as u8),
                 AddressingMode::ABS => self
                     .registers
-                    .set_a(fetch!(self operation!(unwrap arg code))),
+                    .set_a(fetch!(self operation!(unwrap arg code).into())),
                 AddressingMode::ZPG => self
                     .registers
-                    .set_a(fetch!(self operation!(unwrap arg code))),
+                    .set_a(fetch!(self operation!(unwrap arg code).into())),
                 _ => panic!("Invalid addressing mode for {:?}", code.name),
             },
             OpcodeType::STA => match code.addr_mode {
                 AddressingMode::ABS => {
-                    self.ram[operation!(unwrap arg code) as usize] = self.registers.A
+                    self.ram[operation!(unwrap arg code).into()] = self.registers.A
                 }
                 AddressingMode::ZPG => {
-                    self.ram[operation!(unwrap arg code) as usize] = self.registers.A
+                    self.ram[operation!(unwrap arg code).into()] = self.registers.A
                 }
                 AddressingMode::INDX => {
-                    self.ram[operation!(unwrap arg code) as usize] = self.registers.A
+                    self.ram[operation!(unwrap arg code).into()] = self.registers.A
                 }
                 _ => panic!("Invalid addressing mode for {:?}", code.name),
             },
@@ -143,18 +143,18 @@ impl System {
                 _ => panic!("Invalid addressing mode for {:?}", code.name),
             },
             OpcodeType::JMP => match code.addr_mode {
-                AddressingMode::ABS => self.registers.PC = operation!(unwrap arg code) as u16,
+                AddressingMode::ABS => self.registers.PC = operation!(unwrap arg code).into(),
                 _ => panic!("Invalid addressing mode for {:?}", code.name),
             },
             OpcodeType::BEQ if code.addr_mode == AddressingMode::REL => {
                 if self.registers.test(Flags::Zero) {
-                    self.registers.PC = operation!(unwrap arg code);
+                    self.registers.PC = operation!(unwrap arg code).into();
                     branch_taken = true;
                 }
             }
             OpcodeType::BNE if code.addr_mode == AddressingMode::REL => {
                 if !self.registers.test(Flags::Zero) {
-                    self.registers.PC = operation!(unwrap arg code);
+                    self.registers.PC = operation!(unwrap arg code).into();
                     branch_taken = true;
                 }
             }
@@ -169,14 +169,14 @@ impl System {
         if branch_taken || code.name == OpcodeType::JMP {
             println!("Don't increment PC");
         } else {
-            self.registers.PC += get_size(code.addr_mode) as u16;
+            self.registers.PC = self.registers.PC + get_size(code.addr_mode).into();
         }
         self.cycles += 1;
         Ok(())
     }
     pub fn restart(&mut self) {
         self.cycles = 0;
-        self.ram = [0x00; 0x10000];
+        self.ram.load([0x00; 0x10000]);
         self.registers = Registers::default();
     }
 }

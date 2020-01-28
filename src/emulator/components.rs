@@ -1,3 +1,33 @@
+use super::addressing_modes::Address;
+
+/* #region Ram */
+pub struct Ram(pub [u8; 0x10000]);
+impl Ram {
+    pub fn load(&mut self, code: [u8; 0x10000]) {
+        self.0 = code;
+    }
+}
+impl std::ops::Index<Address> for Ram {
+    type Output = u8;
+    fn index(&self, idx: Address) -> &u8 {
+        let idx: usize = idx.into();
+        &self.0[idx]
+    }
+}
+impl std::ops::IndexMut<Address> for Ram {
+    fn index_mut(&mut self, idx: Address) -> &mut u8 {
+        let idx: usize = idx.into();
+        &mut self.0[idx]
+    }
+}
+impl std::ops::Deref for Ram {
+    type Target = [u8; 0x10000];
+    fn deref(&self) -> &[u8; 0x10000] {
+        &self.0
+    }
+}
+/* #endregion */
+
 #[repr(u8)]
 #[derive(PartialEq, Copy, Clone, Debug)]
 pub enum Flags {
@@ -15,7 +45,7 @@ pub struct Registers {
     pub A: u8,
     pub X: u8,
     pub Y: u8,
-    pub PC: u16,
+    pub PC: Address,
     pub flags: u8,
 }
 impl Registers {
@@ -52,7 +82,7 @@ impl std::default::Default for Registers {
             A: 0x00,
             X: 0x00,
             Y: 0x00,
-            PC: 0x0000,
+            PC: 0x0000usize.into(),
             flags: 0b_0010_0000,
         }
     }
@@ -62,7 +92,7 @@ impl std::fmt::Debug for Registers {
         write!(
             f,
             "Registers: \n PC: {:04X}\n A: {:02X} X: {:02X} Y: {:02X}\nNV-BDIZC\n{:08b}",
-            self.PC, self.A, self.X, self.Y, self.flags
+            *self.PC, self.A, self.X, self.Y, self.flags
         )
     }
 }

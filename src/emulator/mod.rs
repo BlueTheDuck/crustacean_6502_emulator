@@ -5,6 +5,6 @@ mod addressing_modes;
 use addressing_modes::AddressingMode;
 mod opcodes;
 use opcodes::OpcodeType;
-mod registers;
+mod components;
 mod system;
 pub use system::System;
